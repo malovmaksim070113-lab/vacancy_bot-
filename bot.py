@@ -7,19 +7,15 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ================== НАСТРОЙКИ ==================
 
-# // ВСТАВЬ СЮДА ТОКЕН БОТА (Railway → Variables)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# // ВСТАВЬ СЮДА TG-КАНАЛ
-CHANNEL_ID = "@tgsdsa"
-
-CHECK_INTERVAL_HOURS = 3
+BOT_TOKEN = os.getenv("BOT_TOKEN")          # ← Railway Variables
+CHANNEL_ID = "@tgsdsa"                      # ← твой канал
+CHECK_INTERVAL_MINUTES = 5
 MIN_SALARY = 150_000
 
 logging.basicConfig(level=logging.INFO)
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set. Add it in Railway → Variables")
+    raise RuntimeError("BOT_TOKEN is not set")
 
 sent_links = set()
 
@@ -37,16 +33,10 @@ def is_sys_analyst(title: str) -> bool:
     return any(k in title for k in keywords)
 
 
-def is_remote(text: str) -> bool:
-    keywords = ["удален", "remote", "дистанцион", "home office"]
-    return any(k in text for k in keywords)
-
-
 def salary_ok(salary: dict | None) -> bool:
     if not salary:
         return True
-
-    values = [v for v in [salary.get("from"), salary.get("to")] if v]
+    values = [v for v in (salary.get("from"), salary.get("to")) if v]
     return not values or max(values) >= MIN_SALARY
 
 
@@ -55,9 +45,9 @@ def salary_ok(salary: dict | None) -> bool:
 def fetch_hh_vacancies():
     url = "https://api.hh.ru/vacancies"
     params = {
-        "text": "системный аналитик",
-        "area": 113,  # Россия
-        "per_page": 20,
+        "text": "аналитик",
+        "area": 113,
+        "per_page": 50,
         "only_with_salary": False
     }
 
@@ -68,19 +58,13 @@ def fetch_hh_vacancies():
     vacancies = []
 
     for item in data.get("items", []):
-        snippet_text = (
-            (item.get("snippet", {}).get("requirement") or "") +
-            (item.get("snippet", {}).get("responsibility") or "")
-        ).lower()
-
         vacancies.append({
             "title": item["name"],
             "company": item["employer"]["name"],
             "rating": item["employer"].get("rating", "—"),
             "link": item["alternate_url"],
             "salary": item.get("salary"),
-            "experience": item.get("experience", {}).get("name", "Не указан"),
-            "snippet": snippet_text
+            "experience": item.get("experience", {}).get("name", "Не указан")
         })
 
     return vacancies
@@ -98,14 +82,14 @@ def format_salary(salary: dict | None) -> str:
 
     frm = salary.get("from")
     to = salary.get("to")
-    currency = salary.get("currency", "RUR")
+    cur = salary.get("currency", "RUR")
 
     if frm and to:
-        return f"{frm}–{to} {currency}"
+        return f"{frm}–{to} {cur}"
     if frm:
-        return f"от {frm} {currency}"
+        return f"от {frm} {cur}"
     if to:
-        return f"до {to} {currency}"
+        return f"до {to} {cur}"
 
     return "ЗП не указана"
 
@@ -122,12 +106,13 @@ def format_message(v: dict) -> str:
 
 
 async def check_and_send():
-    for v in fetch_hh_vacancies():
+    vacancies = fetch_hh_vacancies()
+    logging.info(f"HH returned {len(vacancies)} vacancies")
+
+    for v in vacancies:
         if not is_sys_analyst(v["title"]):
             continue
         if not salary_ok(v["salary"]):
-            continue
-        if not is_remote(v["snippet"]):
             continue
         if v["link"] in sent_links:
             continue
@@ -138,12 +123,12 @@ async def check_and_send():
 
 @dp.message_handler(commands=["start"])
 async def start(msg: types.Message):
-    await msg.answer("🤖 Бот запущен. Вакансии публикуются в канале.")
+    await msg.answer("🤖 Бот запущен. Ищу вакансии системного аналитика.")
 
 
 @dp.message_handler(commands=["check"])
 async def manual_check(msg: types.Message):
-    await msg.answer("🔍 Проверяю вакансии на hh.ru ...")
+    await msg.answer("🔍 Проверяю hh.ru ...")
     await check_and_send()
 
 
@@ -151,8 +136,12 @@ async def manual_check(msg: types.Message):
 
 async def on_startup(dp):
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_and_send, "interval", hours=CHECK_INTERVAL_HOURS)
+    scheduler.add_job(check_and_send, "interval", minutes=CHECK_INTERVAL_MINUTES)
     scheduler.start()
+
+
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
 
 
 if __name__ == "__main__":
