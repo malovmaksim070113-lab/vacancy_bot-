@@ -7,35 +7,57 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # ================== НАСТРОЙКИ ==================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")          # ← Railway Variables
-CHANNEL_ID = "@tgsdsa"                      # ← твой канал
+BOT_TOKEN = os.getenv("BOT_TOKEN")      # Railway → Variables
+CHANNEL_ID = "@tgsdsa"                  # твой канал
+
 CHECK_INTERVAL_MINUTES = 5
 MIN_SALARY = 150_000
 
 logging.basicConfig(level=logging.INFO)
 
 if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set")
+    raise RuntimeError("BOT_TOKEN is not set in Railway Variables")
 
 sent_links = set()
 
-# ================== ФИЛЬТРЫ ==================
+# ================== ФИЛЬТР РОЛЕЙ ==================
 
-def is_sys_analyst(title: str) -> bool:
+def is_target_analyst(title: str) -> bool:
     title = title.lower()
-    keywords = [
+
+    positive_keywords = [
         "системный аналитик",
         "system analyst",
-        "business analyst",
-        "it analyst",
-        "аналитик"
+        "product analyst",
+        "продуктовый аналитик",
     ]
-    return any(k in title for k in keywords)
+
+    negative_keywords = [
+        "data",
+        "bi",
+        "business intelligence",
+        "marketing",
+        "маркетинг",
+        "financial",
+        "финансов",
+        "junior",
+        "стажер",
+        "intern"
+    ]
+
+    if not any(p in title for p in positive_keywords):
+        return False
+
+    if any(n in title for n in negative_keywords):
+        return False
+
+    return True
 
 
 def salary_ok(salary: dict | None) -> bool:
     if not salary:
         return True
+
     values = [v for v in (salary.get("from"), salary.get("to")) if v]
     return not values or max(values) >= MIN_SALARY
 
@@ -46,7 +68,7 @@ def fetch_hh_vacancies():
     url = "https://api.hh.ru/vacancies"
     params = {
         "text": "аналитик",
-        "area": 113,
+        "area": 113,           # Россия
         "per_page": 50,
         "only_with_salary": False
     }
@@ -98,6 +120,7 @@ def format_message(v: dict) -> str:
     return (
         f"{v['title']}\n"
         f"{v['company']}\n"
+        f"Формат: Удалённая работа\n"
         f"{format_salary(v['salary'])}\n"
         f"Опыт: {v['experience']}\n"
         f"Рейтинг компании: {v['rating']}\n"
@@ -110,7 +133,7 @@ async def check_and_send():
     logging.info(f"HH returned {len(vacancies)} vacancies")
 
     for v in vacancies:
-        if not is_sys_analyst(v["title"]):
+        if not is_target_analyst(v["title"]):
             continue
         if not salary_ok(v["salary"]):
             continue
@@ -123,12 +146,12 @@ async def check_and_send():
 
 @dp.message_handler(commands=["start"])
 async def start(msg: types.Message):
-    await msg.answer("🤖 Бот запущен. Ищу вакансии системного аналитика.")
+    await msg.answer("🤖 Бот запущен. Ищу вакансии системного и продуктового аналитика.")
 
 
 @dp.message_handler(commands=["check"])
 async def manual_check(msg: types.Message):
-    await msg.answer("🔍 Проверяю hh.ru ...")
+    await msg.answer("🔍 Проверяю hh.ru …")
     await check_and_send()
 
 
@@ -142,6 +165,7 @@ async def on_startup(dp):
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 if __name__ == "__main__":
